@@ -538,7 +538,7 @@ typedef enum {
 } data_rate_mode;
 
 typedef enum {
-    NO_SYNC,
-    INTERNAL_SYNC,
+    INTERNAL_SYNC = 0,
     EXTERNAL_SYNC,
+    NO_SYNC,
 } sync_mode;

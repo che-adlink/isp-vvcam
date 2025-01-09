@@ -195,6 +195,7 @@ struct imx678 {
 	unsigned int rst_gpio;
 	unsigned int csi_id;
 	unsigned int powered_on;
+	unsigned int inck;
 
 	struct v4l2_subdev sd;
 	struct media_pad pads[IMX678_SENS_PADS_NUM];
@@ -310,6 +311,30 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 		.reg_data_count = ARRAY_SIZE(imx678_init_setting),
 	},
 };
+
+static int mclk_to_inck(unsigned int mclk)
+{
+	switch (mclk) {
+		case 74250000:
+			return 0;
+		case 37125000:
+			return 1;
+		case 72000000:
+			return 2;
+		case 27000000:
+			return 3;
+		case 24000000:
+			return 4;
+		case 36000000:
+			return 5;
+		case 18000000:
+			return 6;
+		case 13500000:
+			return 7;
+		default:
+			return -1;
+	}
+}
 
 static int imx678_write_reg(struct imx678 *sensor, u16 reg, u8 val)
 {
@@ -746,7 +771,13 @@ static int imx678_set_data_rate(struct imx678 *sensor, u32 data_rate)
         return ret;
     }
 
-    return ret;
+	ret = imx678_write_reg(sensor, INCK_SEL, sensor->inck);
+	if (ret < 0) {
+		pr_err("%s: unable to set inck\n", __func__);
+		return ret;
+	}
+
+	return ret;
 
 fail:
     pr_info("%s: unable to set data rate\n", __func__);
@@ -1472,6 +1503,18 @@ static int imx678_probe(struct i2c_client *client,
 	if (retval) {
 		dev_err(dev, "csi id missing or invalid\n");
 		return retval;
+	}
+
+	retval = of_property_read_u32(dev->of_node, "mclk", &(sensor->inck));
+	if (retval) {
+		dev_err(dev, "mclk missing or invalid\n");
+		return retval;
+	}
+
+	sensor->inck = mclk_to_inck(sensor->inck);
+	if (sensor->inck < 0) {
+		dev_err(dev, "invalid mclk\n");
+		return sensor->inck;
 	}
 
 	retval = imx678_power_on(sensor);
