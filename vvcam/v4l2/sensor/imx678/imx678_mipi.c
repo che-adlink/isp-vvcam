@@ -197,6 +197,7 @@ struct imx678 {
 	unsigned int powered_on;
 	unsigned int inck;
 	unsigned int mclk;
+	unsigned int mono;
 	struct clk *sensor_clk;
 
 	struct v4l2_subdev sd;
@@ -501,6 +502,9 @@ static int imx678_power_on(struct imx678 *sensor)
 	ret = clk_prepare_enable(sensor->sensor_clk);
 	if (ret < 0)
 		pr_err("%s: enable sensor clk fail\n", __func__);
+
+	if (sensor->mono)
+		imx678_write_reg(sensor, 0x3019, 1);
 
 	sensor->powered_on = 1;
 	msleep(35);
@@ -1532,6 +1536,9 @@ static int imx678_probe(struct i2c_client *client,
 		dev_err(dev, "mclk missing or invalid\n");
 		return retval;
 	}
+
+	if(of_property_read_bool(dev->of_node, "mono_mode"))
+		sensor->mono = 1;
 
 	sensor->inck = mclk_to_inck(sensor->mclk);
 	if (sensor->inck < 0) {
