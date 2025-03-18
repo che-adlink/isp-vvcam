@@ -237,7 +237,7 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 			.height        = 2160,
 		},
 		.hdr_mode       = SENSOR_MODE_LINEAR,
-		.bit_width      = 10,
+		.bit_width      = 12,
 		.data_compress  = {
 			.enable = 0,
 		},
@@ -245,7 +245,7 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 		.ae_info = {
 			.def_frm_len_lines     = IMX678_MAX_BOUNDS_HEIGHT,
 			.curr_frm_len_lines    = IMX678_MAX_BOUNDS_HEIGHT,
-			.one_line_exp_time_ns  = IMX678_LINE_TIME,
+			.one_line_exp_time_ns  = 17777,
 
 			.max_integration_line  = IMX678_MAX_BOUNDS_HEIGHT - 1,
 			.min_integration_line  = 3,
@@ -256,8 +256,8 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 			.min_dgain             = 1 * 1024, // 0 db
 			.gain_step             = 36,
 			.start_exposure        = 5000 * 1024, // 5000 * 1024,
-			.cur_fps               = 30 * 1024,
-			.max_fps               = 30 * 1024,
+			.cur_fps               = 25 * 1024,
+			.max_fps               = 25 * 1024,
 			.min_fps               = 5 * 1024,
 			.min_afps              = 5 * 1024,
 			.int_update_delay_frm  = 1,
@@ -516,6 +516,12 @@ static int imx678_power_off(struct imx678 *sensor)
 {
 	int err = 0;
 	pr_info("enter %s\n", __func__);
+
+	if (sensor->powered_on == 0) {
+		pr_err("imx678 is already off\n");
+
+		return 0;
+	}
 
 	err = imx678_write_reg(sensor, XVS_XHS_DRV, 0xF);
 	if (err < 0) {
@@ -1256,7 +1262,7 @@ static int imx678_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct imx678 *sensor = client_to_imx678(client);
-	u32 cur_code = MEDIA_BUS_FMT_SRGGB10_1X10;
+	u32 cur_code = MEDIA_BUS_FMT_SRGGB12_1X12;
 	pr_info("enter %s\n", __func__);
 	if (code->index > 0)
 		return -EINVAL;
