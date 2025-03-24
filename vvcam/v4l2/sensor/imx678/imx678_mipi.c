@@ -671,14 +671,14 @@ static int imx678_adjust_hmax_register(struct imx678 *sensor)
 		if (current_binning_mode) {
 			hmax = 550;
 		} else {
-			hmax = (sensor->format.code == MEDIA_BUS_FMT_SRGGB10_1X10) ? 550 : 660;
+			hmax = (sensor->format.code == MEDIA_BUS_FMT_Y10_1X10) ? 550 : 660;
 		}
 		break;
     case IMX678_1188_MBPS:
 		hmax = 1100;
         break;
     case IMX678_891_MBPS:
-        hmax = (sensor->format.code == MEDIA_BUS_FMT_SRGGB10_1X10) ? 1100 : 1320;
+        hmax = (sensor->format.code == MEDIA_BUS_FMT_Y10_1X10) ? 1100 : 1320;
         break;
     case IMX678_720_MBPS:
         if (current_binning_mode) {
@@ -756,13 +756,13 @@ static int imx678_change_data_rate(struct imx678 *sensor, u32 data_rate)
                 data_rate = IMX678_891_MBPS;
                 break;
             case IMX678_720_MBPS:
-                if (sensor->format.code == MEDIA_BUS_FMT_SRGGB12_1X12) {
+                if (sensor->format.code == MEDIA_BUS_FMT_Y12_1X12) {
                     dev_warn(dev, "%s: Selected data rate is not supported with 12 bit mode, switching to 1188 mode!\n", __func__);
                     data_rate = IMX678_1188_MBPS;
                 }
                 break;
             case IMX678_1188_MBPS:
-                if (sensor->format.code == MEDIA_BUS_FMT_SRGGB10_1X10) {
+                if (sensor->format.code == MEDIA_BUS_FMT_Y10_1X10) {
                     dev_warn(dev, "%s: Selected data rate is not supported with 10 bit mode, switching to 891 mode!\n", __func__);
                     data_rate = IMX678_891_MBPS;
                 }
@@ -1003,7 +1003,7 @@ static int imx678_set_black_level(struct imx678 *sensor, s64 val, u32 which_cont
 	s64 black_level_reg;
 	pr_info("enter %s black level: %lld\n",  __func__, val);
 
-	if (sensor->format.code == MEDIA_BUS_FMT_SRGGB10_1X10) {
+	if (sensor->format.code == MEDIA_BUS_FMT_Y10_1X10) {
 		black_level_reg = val;
     } else {
 		black_level_reg = val >> 2;
@@ -1175,9 +1175,9 @@ static int imx678_get_format_code(struct imx678 *sensor, u32 *code)
 		if (sensor->cur_mode.bit_width == 8) {
 			*code = MEDIA_BUS_FMT_SRGGB8_1X8;
 		} else if (sensor->cur_mode.bit_width == 10) {
-			*code = MEDIA_BUS_FMT_SRGGB10_1X10;
+			*code = MEDIA_BUS_FMT_Y10_1X10;
 		} else {
-			*code = MEDIA_BUS_FMT_SRGGB12_1X12;
+			*code = MEDIA_BUS_FMT_Y12_1X12;
 		}
 		break;
 	case BAYER_GRBG:
@@ -1219,10 +1219,10 @@ static int imx678_set_pixel_format(struct imx678 *sensor)
     int err;
 
     switch (sensor->format.code) {
-    case MEDIA_BUS_FMT_SRGGB10_1X10:
+    case MEDIA_BUS_FMT_Y10_1X10:
 		err = imx678_write_reg_arry(sensor, (struct vvcam_sccb_data_s *)imx678_10bit_mode, ARRAY_SIZE(imx678_10bit_mode));
         break;
-    case MEDIA_BUS_FMT_SRGGB12_1X12:
+    case MEDIA_BUS_FMT_Y12_1X12:
 		err = imx678_write_reg_arry(sensor, (struct vvcam_sccb_data_s *)imx678_12bit_mode, ARRAY_SIZE(imx678_12bit_mode));
         break;
     default:
@@ -1262,7 +1262,7 @@ static int imx678_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct imx678 *sensor = client_to_imx678(client);
-	u32 cur_code = MEDIA_BUS_FMT_SRGGB12_1X12;
+	u32 cur_code = MEDIA_BUS_FMT_Y12_1X12;
 	pr_info("enter %s\n", __func__);
 	if (code->index > 0)
 		return -EINVAL;
