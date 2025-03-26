@@ -1,0 +1,15 @@
+ifneq ($(KERNELRELEASE),)
+EXTRA_CFLAGS += -I$(PWD)/../../../common/ -O2 -Werror
+MOD_NAME ?= imx678
+real ?= mono
+
+$(MOD_NAME)-objs := imx678_$(real)_mipi.o
+
+obj-m += $(MOD_NAME).o
+else
+KSRC ?= /lib/modules/$(shell uname -r)/build
+
+default clean install:
+	$(MAKE) -C $(KSRC) M=$(shell pwd) $(MAKECMDGOALS)
+
+endif
