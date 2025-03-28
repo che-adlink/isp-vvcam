@@ -396,6 +396,32 @@ static int imx678_read_reg(struct imx678 *sensor, u16 reg, u8 *val)
 	return 0;
 }
 
+static int imx678_write_3_reg(struct imx678 *sensor, u16 reg, u32 val)
+{
+	int ret = 0;
+
+	ret |= imx678_write_reg(sensor, reg + 2, (val >> 16) & 0xff);
+	ret |= imx678_write_reg(sensor, reg + 1, (val >> 8) & 0xff);
+	ret |= imx678_write_reg(sensor, reg, val & 0xff);
+
+	return ret;
+}
+
+
+static int imx678_read_3_reg(struct imx678 *sensor, u16 reg, u32 *val)
+{
+	int ret = 0;
+	u8 v1, v2, v3;
+
+	ret |= imx678_read_reg(sensor, reg, &v1);
+	ret |= imx678_read_reg(sensor, reg + 1, &v2);
+	ret |= imx678_read_reg(sensor, reg + 2, &v3);
+
+	*val = (v3 << 16) | (v2 << 8) | v1;
+
+	return ret;
+}
+
 /*
 i2c communication occasionally fails with sensor sending a NACK without a clear reason.
 Retry sending a message for IMX678_MAX_RETRIES and report a problem.
@@ -891,6 +917,7 @@ static int imx678_set_exp(struct imx678 *sensor, u32 exp, unsigned int which_con
 	u32 integration_time_line;
 	u32 reg_shr0 = 0;
 	u32 frame_length;
+	u32 reg_vmax;
 
 	frame_length = sensor->cur_mode.ae_info.curr_frm_len_lines;
 
@@ -906,23 +933,26 @@ static int imx678_set_exp(struct imx678 *sensor, u32 exp, unsigned int which_con
 		integration_time_line = exp * IMX678_K_FACTOR / sensor->cur_mode.ae_info.one_line_exp_time_ns;
 	}
 
-	reg_shr0 = frame_length - integration_time_line;
+	do {
+		s32 tmp = frame_length - integration_time_line;
+		reg_shr0 = tmp < 4 ? 4 : tmp;
+	} while (0);
 
 	/* Value must be multiple of 2 */
     reg_shr0 = (reg_shr0 % 2) ? reg_shr0 + 1 : reg_shr0;
 
-    if (reg_shr0 < IMX678_MIN_SHR0_LENGTH)
-        reg_shr0 = IMX678_MIN_SHR0_LENGTH;
-	else if (reg_shr0 > (frame_length - IMX678_MIN_INTEGRATION_LINES))
-		reg_shr0 = frame_length - IMX678_MIN_INTEGRATION_LINES;
+    ret |= imx678_read_3_reg(sensor, VMAX_LOW, &reg_vmax);
+
+    if (frame_length < integration_time_line)
+	    reg_vmax = (integration_time_line + 5) & ~0x1;
 
 	pr_info("enter %s exposure register: %u integration_time_line: %u\n", __func__, reg_shr0, integration_time_line);
 	ret = imx678_write_reg(sensor, REGHOLD, 1);
-	ret |= imx678_write_reg(sensor, SHR0_HIGH, (reg_shr0 >> 16) & 0xff);
-	ret |= imx678_write_reg(sensor, SHR0_MID, (reg_shr0 >> 8) & 0xff);
-	ret |= imx678_write_reg(sensor, SHR0_LOW, reg_shr0 & 0xff);
-	ret |= imx678_write_reg(sensor, REGHOLD, 0);
 
+	ret |= imx678_write_3_reg(sensor, SHR0_LOW, reg_shr0);
+	ret |= imx678_write_3_reg(sensor, VMAX_LOW, reg_vmax);
+
+	ret |= imx678_write_reg(sensor, REGHOLD, 0);
 	if (ret < 0) {
 		pr_err("%s Failed to set exposure exp: %u, shr register:  %u\n", __func__, exp, reg_shr0);
 	}
@@ -1023,7 +1053,7 @@ static int imx678_set_black_level(struct imx678 *sensor, s64 val, u32 which_cont
 
 static int imx678_set_fps(struct imx678 *sensor, u32 fps, u32 which_control)
 {
-	u32 fps_reg;
+	u32 fps_reg, exp_reg;
 	u32 line_time;
 	int ret = 0;
 	pr_info("enter %s fps received: %u\n", __func__, fps);
@@ -1042,9 +1072,15 @@ static int imx678_set_fps(struct imx678 *sensor, u32 fps, u32 which_control)
 	fps_reg = IMX678_G_FACTOR / ((fps >> 10) * line_time);
 	pr_info("enter %s vmax register: %u\n", __func__, fps_reg);
 	ret = imx678_write_reg(sensor, REGHOLD, 1);
-	ret |= imx678_write_reg(sensor, VMAX_HIGH, (u8)(fps_reg >> 16) & 0xff);
-	ret |= imx678_write_reg(sensor, VMAX_MID, (u8)(fps_reg >> 8) & 0xff);
-	ret |= imx678_write_reg(sensor, VMAX_LOW, (u8)(fps_reg & 0xff));
+
+	ret |= imx678_read_3_reg(sensor, SHR0_LOW, &exp_reg);
+
+	if(exp_reg >= fps_reg) {
+		exp_reg = fps_reg - 1;
+		ret |= imx678_write_3_reg(sensor, SHR0_LOW, exp_reg);
+	}
+
+	ret |= imx678_write_3_reg(sensor, VMAX_LOW, fps_reg);
 	ret |= imx678_write_reg(sensor, REGHOLD, 0);
 
 	sensor->cur_mode.ae_info.cur_fps = fps;
@@ -1123,6 +1159,7 @@ static int imx678_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct imx678 *sensor = to_imx678_dev(sd);
 	int ret;
 
+	pr_info("enter %s\n", __func__);
 	/* v4l2_ctrl_lock() locks our own mutex */
 
 	/*
@@ -1313,22 +1350,26 @@ static int imx678_set_fmt(struct v4l2_subdev *sd,
 		ret = imx678_write_reg_arry(sensor, (struct vvcam_sccb_data_s *)mode_3856x2180, ARRAY_SIZE(mode_3856x2180));
 		if (ret < 0) {
 			pr_err("%s:imx678_write_reg_arry error, failed to set up resolution\n",__func__);
+			mutex_unlock(&sensor->lock);
 			return -EINVAL;
 		}
 		ret = imx678_set_data_rate(sensor, IMX678_891_MBPS);
 		if (ret < 0) {
 			pr_err("%s:imx678_write_reg_arry error, failed to set data rate\n",__func__);
+			mutex_unlock(&sensor->lock);
 			return -EINVAL;
 		}
 	} else if (sensor->cur_mode.size.bounds_height == IMX678_MODE_BINNING_H2V2_HEIGHT) {
 		ret = imx678_write_reg_arry(sensor, (struct vvcam_sccb_data_s *)mode_h2v2_binning, ARRAY_SIZE(mode_h2v2_binning));
 		if (ret < 0) {
 			pr_err("%s:imx678_write_reg_arry error, failed to set up resolution\n",__func__);
+			mutex_unlock(&sensor->lock);
 			return -EINVAL;
 		}
 		ret = imx678_set_data_rate(sensor, IMX678_720_MBPS);
 		if (ret < 0) {
 			pr_err("%s:imx678_write_reg_arry error, failed to set data rate\n",__func__);
+			mutex_unlock(&sensor->lock);
 			return -EINVAL;
 		}
 	}
@@ -1357,7 +1398,7 @@ static long imx678_priv_ioctl(struct v4l2_subdev *sd,
 	struct imx678 *sensor = client_to_imx678(client);
 	long ret = 0;
 	struct vvcam_sccb_data_s sensor_reg;
-	pr_info("enter %s %u\n", __func__, cmd);
+	pr_info("enter %s %08x\n", __func__, cmd);
 	mutex_lock(&sensor->lock);
 	switch (cmd){
 	case VVSENSORIOC_S_POWER:
@@ -1587,7 +1628,7 @@ static int imx678_probe(struct i2c_client *client,
 	// add new controls
 
 	sensor->ctrls.exposure = v4l2_ctrl_new_std(&sensor->ctrls.handler, &imx678_ctrl_ops, V4L2_CID_EXPOSURE,
-					    3, 30000, 1, 1000);
+					    3, 18640000, 1, 1000);
 	sensor->ctrls.gain = v4l2_ctrl_new_std(&sensor->ctrls.handler, &imx678_ctrl_ops, V4L2_CID_GAIN,
 					0, 240, 3, 0);
 	sensor->ctrls.black_level = v4l2_ctrl_new_std(&sensor->ctrls.handler, &imx678_ctrl_ops, V4L2_CID_BLACK_LEVEL,
