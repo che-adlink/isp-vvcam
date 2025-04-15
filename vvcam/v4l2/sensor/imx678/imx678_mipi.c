@@ -73,6 +73,7 @@
 #define V4L2_CID_DATA_RATE		(V4L2_CID_USER_IMX_BASE + 1)
 #define V4L2_CID_SYNC_MODE		(V4L2_CID_USER_IMX_BASE + 2)
 #define V4L2_CID_FRAME_RATE		(V4L2_CID_USER_IMX_BASE + 3)
+#define V4L2_CID_SENSOR_MODE		(V4L2_CID_USER_IMX_BASE + 4)
 
 const char * const data_rate_menu[] = {
     [IMX678_2376_MBPS] = "2376 Mbps/lane",
@@ -178,6 +179,19 @@ static struct v4l2_ctrl_config imx678_ctrl_framerate[] = {
 	},
 };
 
+static struct v4l2_ctrl_config imx678_ctrl_sensor_mode[] = {
+	{
+		.ops = &imx678_ctrl_ops,
+		.id = V4L2_CID_SENSOR_MODE,
+		.name = "Sensor mode",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = 0,
+		.max = 2,
+		.def = 0,
+		.step = 1,
+	},
+};
+
 struct imx678_ctrls {
 	struct v4l2_ctrl_handler handler;
 	struct v4l2_ctrl *exposure;
@@ -187,6 +201,7 @@ struct imx678_ctrls {
 	struct v4l2_ctrl *black_level;
 	struct v4l2_ctrl *data_rate;
 	struct v4l2_ctrl *sync_mode;
+	struct v4l2_ctrl *sensor_mode;
 };
 
 struct imx678 {
@@ -237,7 +252,7 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 			.height        = 2160,
 		},
 		.hdr_mode       = SENSOR_MODE_LINEAR,
-		.bit_width      = 12,
+		.bit_width      = 10,
 		.data_compress  = {
 			.enable = 0,
 		},
@@ -245,7 +260,7 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 		.ae_info = {
 			.def_frm_len_lines     = IMX678_MAX_BOUNDS_HEIGHT,
 			.curr_frm_len_lines    = IMX678_MAX_BOUNDS_HEIGHT,
-			.one_line_exp_time_ns  = 17777,
+			.one_line_exp_time_ns  = IMX678_LINE_TIME,
 
 			.max_integration_line  = IMX678_MAX_BOUNDS_HEIGHT - 1,
 			.min_integration_line  = 3,
@@ -256,8 +271,8 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 			.min_dgain             = 1 * 1024, // 0 db
 			.gain_step             = 36,
 			.start_exposure        = 5000 * 1024, // 5000 * 1024,
-			.cur_fps               = 25 * 1024,
-			.max_fps               = 25 * 1024,
+			.cur_fps               = 30 * 1024,
+			.max_fps               = 30 * 1024,
 			.min_fps               = 5 * 1024,
 			.min_afps              = 5 * 1024,
 			.int_update_delay_frm  = 1,
@@ -312,6 +327,49 @@ static struct vvcam_mode_info_s pimx678_mode_info[] = {
 		},
 		.preg_data      = imx678_init_setting,
 		.reg_data_count = ARRAY_SIZE(imx678_init_setting),
+	},
+	{
+		.index		= 2,
+		.size		= {
+			.bounds_width	= IMX678_DEFAULT_WIDTH,
+			.bounds_height	= IMX678_DEFAULT_HEIGHT,
+			.top		= 12,
+			.left		= 8,
+			.width		= 3840,
+			.height		= 2160,
+		},
+		.hdr_mode	= SENSOR_MODE_LINEAR,
+		.bit_width	= 12,
+		.data_compress	= {
+			.enable	= 0,
+		},
+		.bayer_pattern = BAYER_RGGB,
+		.ae_info = {
+			.def_frm_len_lines	= IMX678_MAX_BOUNDS_HEIGHT,
+			.curr_frm_len_lines	= IMX678_MAX_BOUNDS_HEIGHT,
+			.one_line_exp_time_ns	= 17777,
+
+			.max_integration_line	= IMX678_MAX_BOUNDS_HEIGHT - 1,
+			.min_integration_line	= 3,
+
+			.max_again		= 32382,    // 30 db
+			.min_again		= 1 * 1024, // 0 db
+			.max_dgain		= 4044235,  // 42 db
+			.min_dgain		= 1 * 1024, // 0 db
+			.gain_step		= 36,
+			.start_exposure		= 5000 * 1024, // 5000 * 1024,
+			.cur_fps		= 25 * 1024,
+			.max_fps		= 25 * 1024,
+			.min_fps		= 5 * 1024,
+			.min_afps		= 5 * 1024,
+			.int_update_delay_frm	= 1,
+			.gain_update_delay_frm	= 1,
+		},
+		.mipi_info = {
+			.mipi_lane = 4,
+		},
+		.preg_data	= imx678_init_setting,
+		.reg_data_count	= ARRAY_SIZE(imx678_init_setting),
 	},
 };
 
@@ -653,13 +711,17 @@ static int imx678_get_sensor_mode(struct imx678 *sensor, void* pmode)
 	return ret;
 }
 
-static int imx678_set_sensor_mode(struct imx678 *sensor, void* pmode)
+static int imx678_set_sensor_mode(struct imx678 *sensor, void* pmode, int which)
 {
 	int ret = 0;
 	int i = 0;
 	struct vvcam_mode_info_s sensor_mode;
 	pr_info("enter %s\n", __func__);
-	ret = copy_from_user(&sensor_mode, pmode,
+
+	if(which)
+		memcpy(&sensor_mode, pmode,
+			sizeof(struct vvcam_mode_info_s));
+	else ret = copy_from_user(&sensor_mode, pmode,
 		sizeof(struct vvcam_mode_info_s));
 	if (ret != 0) {
 		pr_err("enter %s: Failed to get sensor mode \n", __func__);
@@ -1183,6 +1245,12 @@ static int imx678_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FRAME_RATE:
 		ret = imx678_set_fps(sensor, ctrl->val, 1);
 		break;
+	case V4L2_CID_SENSOR_MODE:
+		struct vvcam_mode_info_s sensor_mode;
+
+		sensor_mode.index = ctrl->val;
+		ret = imx678_set_sensor_mode(sensor, &sensor_mode, 1);
+		break;
 	case V4L2_CID_BLACK_LEVEL:
 		ret = imx678_set_black_level(sensor, ctrl->val, 1);
 		break;
@@ -1429,7 +1497,7 @@ static long imx678_priv_ioctl(struct v4l2_subdev *sd,
 		ret = imx678_get_sensor_mode(sensor, arg);
 		break;
 	case VVSENSORIOC_S_SENSOR_MODE:
-		ret = imx678_set_sensor_mode(sensor, arg);
+		ret = imx678_set_sensor_mode(sensor, arg, 0);
 		break;
 	case VVSENSORIOC_S_STREAM:
 		ret = imx678_s_stream(&sensor->sd, *(int *)arg);
@@ -1636,6 +1704,7 @@ static int imx678_probe(struct i2c_client *client,
 	sensor->ctrls.data_rate = v4l2_ctrl_new_custom(&sensor->ctrls.handler, imx678_ctrl_data_rate, NULL);
 	sensor->ctrls.sync_mode = v4l2_ctrl_new_custom(&sensor->ctrls.handler, imx678_ctrl_sync_mode, NULL);
 	sensor->ctrls.framerate = v4l2_ctrl_new_custom(&sensor->ctrls.handler, imx678_ctrl_framerate, NULL);
+	sensor->ctrls.sensor_mode = v4l2_ctrl_new_custom(&sensor->ctrls.handler, imx678_ctrl_sensor_mode, NULL);
 	sensor->ctrls.test_pattern = v4l2_ctrl_new_std_menu_items(&sensor->ctrls.handler, &imx678_ctrl_ops, V4L2_CID_TEST_PATTERN,
 					     ARRAY_SIZE(test_pattern_menu) - 1, 0, 0, test_pattern_menu);
 
